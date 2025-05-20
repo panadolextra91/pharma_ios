@@ -2,16 +2,19 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, SafeAreaView, Image } from 'react-native';
 import { useFonts } from 'expo-font';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../context/AuthContext';
 import SearchBar from '../components/ui/SearchBar';
 import BottomMenu from '../components/ui/BottomMenu';
 import ScheduleIcon from '../assets/052_Medical_App.png'
 import PharmaciesIcon from '../assets/Location.png'
 import HealthRecordsIcon from '../assets/Records.png'
 import NewsIcon from '../assets/Defibrillator.png'
+import MediMaster from '../assets/MediMaster.png'
 const { width } = Dimensions.get('window');
 
 const Home = () => {
   const navigation = useNavigation();
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = React.useState('');
 
   // Load fonts
@@ -44,7 +47,7 @@ const Home = () => {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Hello,</Text>
-            <Text style={styles.userName}>User</Text>
+            <Text style={styles.userName}>{user?.name || 'User'}</Text>
           </View>
           <TouchableOpacity style={styles.profileButton}>
             <Text style={styles.profileIcon}>👤</Text>
@@ -137,16 +140,15 @@ const styles = StyleSheet.create({
     fontFamily: 'DarkerGrotesque-Bold',
   },
   profileButton: {
-    width: 50,
-    height: 50,
+    width: 40,
+    height: 40,
     borderRadius: 25,
-    backgroundColor: '#fff',
+    backgroundColor: 'white',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 3,
   },
   profileIcon: {
-    fontSize: 24,
+    fontSize: 20
   },
   content: {
     flex: 1,
@@ -182,8 +184,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   actionIcon: {
-    width: 40,
-    height: 40,
+    width: 60,
+    height: 60,
     marginBottom: 10,
   },
   actionText: {

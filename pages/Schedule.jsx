@@ -1,19 +1,28 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Image } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Image, Switch, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import BottomMenu from '../components/ui/BottomMenu';
-import ScheduleIcon from '../assets/052_Medical_App.png'
+import ScheduleIcon from '../assets/052_Medical_App.png';
+import AddNewMedicineSchedule from '../components/ui/schedule/AddNewMedicineSchedule';
+import EditMedicineSchedule from '../components/ui/schedule/EditMedicineSchedule';
+import * as Notifications from 'expo-notifications';
+import { requestNotificationPermissions, scheduleMedicineReminder, cancelMedicineReminder } from '../services/NotificationService';
 
 
 const Schedule = ({ navigation }) => {
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const notificationListener = useRef();
+  const responseListener = useRef();
   const [medicines, setMedicines] = useState([
     { id: 1, name: 'Paracetamol', time: new Date(), days: [1, 2, 3, 4, 5], dosage: '1 pill' },
     { id: 2, name: 'Vitamin C', time: new Date(), days: [0, 2, 4, 6], dosage: '2 pills' },
   ]);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [isAdding, setIsAdding] = useState(false);
+  const [showMedicineModal, setShowMedicineModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedMedicine, setSelectedMedicine] = useState(null);
   const [newMedicine, setNewMedicine] = useState({
     name: '',
     time: new Date(),
@@ -30,50 +39,76 @@ const Schedule = ({ navigation }) => {
     { id: 5, label: 'Fri' },
     { id: 6, label: 'Sat' },
   ];
+  
+  useEffect(() => {
+    // Check notification permissions when component mounts
+    checkNotificationPermissions();
+    
+    // Set up notification listeners
+    notificationListener.current = Notifications.addNotificationReceivedListener(
+      notification => {
+        // Handle received notification
+        console.log('Notification received:', notification);
+      }
+    );
+    
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(
+      response => {
+        // Handle user response to notification
+        console.log('Notification response:', response);
+        navigation.navigate('Schedule');
+      }
+    );
+    
+    return () => {
+      // Clean up listeners when component unmounts
+      Notifications.removeNotificationSubscription(notificationListener.current);
+      Notifications.removeNotificationSubscription(responseListener.current);
+    };
+  }, []);
+  
+  const checkNotificationPermissions = async () => {
+    const hasPermission = await requestNotificationPermissions();
+    setNotificationsEnabled(hasPermission);
+  };
 
   const handleTimeChange = (event, selectedTime) => {
     setShowTimePicker(false);
     if (selectedTime) {
-      if (isAdding) {
-        setNewMedicine({ ...newMedicine, time: selectedTime });
-      } else {
-        const updatedMedicines = medicines.map(med => 
-          med.id === editingId ? { ...med, time: selectedTime } : med
-        );
-        setMedicines(updatedMedicines);
-      }
-    }
-  };
-
-  const toggleDay = (dayId) => {
-    if (isAdding) {
-      const newDays = newMedicine.days.includes(dayId)
-        ? newMedicine.days.filter(id => id !== dayId)
-        : [...newMedicine.days, dayId];
-      setNewMedicine({ ...newMedicine, days: newDays });
-    } else {
-      const updatedMedicines = medicines.map(med => {
-        if (med.id === editingId) {
-          const newDays = med.days.includes(dayId)
-            ? med.days.filter(id => id !== dayId)
-            : [...med.days, dayId];
-          return { ...med, days: newDays };
-        }
-        return med;
-      });
+      const updatedMedicines = medicines.map(med => 
+        med.id === editingId ? { ...med, time: selectedTime } : med
+      );
       setMedicines(updatedMedicines);
     }
   };
 
-  const addMedicine = () => {
-    if (!newMedicine.name || !newMedicine.dosage || newMedicine.days.length === 0) {
-      Alert.alert('Error', 'Please fill in all fields and select at least one day');
-      return;
-    }
+  const toggleDay = (dayId) => {
+    const updatedMedicines = medicines.map(med => {
+      if (med.id === editingId) {
+        const newDays = med.days.includes(dayId)
+          ? med.days.filter(id => id !== dayId)
+          : [...med.days, dayId];
+        return { ...med, days: newDays };
+      }
+      return med;
+    });
+    setMedicines(updatedMedicines);
+  };
+
+  const addMedicine = async (medicineData) => {
     const newId = medicines.length > 0 ? Math.max(...medicines.map(m => m.id)) + 1 : 1;
-    setMedicines([...medicines, { ...newMedicine, id: newId }]);
-    setNewMedicine({ name: '', time: new Date(), days: [], dosage: '' });
-    setIsAdding(false);
+    const newMedicine = { ...medicineData, id: newId };
+    
+    setMedicines(prev => [...prev, newMedicine]);
+    
+    // Schedule notifications if enabled
+    if (notificationsEnabled) {
+      try {
+        await scheduleMedicineReminder(newMedicine);
+      } catch (error) {
+        console.error('Failed to schedule notification:', error);
+      }
+    }
   };
 
   const deleteMedicine = (id) => {
@@ -85,7 +120,16 @@ const Schedule = ({ navigation }) => {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
+            // Cancel notifications for this medicine
+            if (notificationsEnabled) {
+              try {
+                await cancelMedicineReminder(id);
+              } catch (error) {
+                console.error('Failed to cancel notification:', error);
+              }
+            }
+            
             setMedicines(medicines.filter(med => med.id !== id));
             if (editingId === id) setEditingId(null);
           },
@@ -109,9 +153,40 @@ const Schedule = ({ navigation }) => {
     <View style={styles.container}>
       <ScrollView style={styles.scrollView}>
         <View style={styles.headerContainer}>
-        <Image source={ScheduleIcon} style={styles.icon} />
+          <Image source={ScheduleIcon} style={styles.icon} />
           <Text style={styles.header}>Medicine Schedule</Text>
-          
+          <View style={styles.notificationToggle}>
+            <Text style={styles.notificationText}>Reminders</Text>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={async (value) => {
+                if (value) {
+                  // Request permissions if turning on
+                  const hasPermission = await requestNotificationPermissions();
+                  if (hasPermission) {
+                    setNotificationsEnabled(true);
+                    // Schedule notifications for all medicines
+                    for (const medicine of medicines) {
+                      await scheduleMedicineReminder(medicine);
+                    }
+                  } else {
+                    Alert.alert(
+                      'Permission Required',
+                      'Notification permission is required to enable reminders.'
+                    );
+                  }
+                } else {
+                  // Cancel all notifications if turning off
+                  setNotificationsEnabled(false);
+                  for (const medicine of medicines) {
+                    await cancelMedicineReminder(medicine.id);
+                  }
+                }
+              }}
+              trackColor={{ false: '#d1d1d1', true: '#a9ffe1' }}
+              thumbColor={notificationsEnabled ? '#51ffc6' : '#f4f3f4'}
+            />
+          </View>
         </View>
         
         {medicines.map(medicine => (
@@ -121,12 +196,12 @@ const Schedule = ({ navigation }) => {
               <View style={styles.medicineActions}>
                 <TouchableOpacity 
                   onPress={() => {
-                    setEditingId(editingId === medicine.id ? null : medicine.id);
-                    setIsAdding(false);
+                    setSelectedMedicine(medicine);
+                    setShowEditModal(true);
                   }}
                 >
                   <Ionicons 
-                    name={editingId === medicine.id ? 'close' : 'pencil'} 
+                    name="pencil" 
                     size={24} 
                     color="#51ffc6" 
                   />
@@ -180,102 +255,56 @@ const Schedule = ({ navigation }) => {
           </View>
         ))}
         
-        {isAdding && (
-          <View style={[styles.medicineCard, styles.addForm]}>
-            <Text style={styles.addHeader}>Add New Medicine</Text>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Medicine Name</Text>
-              <TextInput
-                style={styles.input}
-                value={newMedicine.name}
-                onChangeText={text => setNewMedicine({...newMedicine, name: text})}
-                placeholder="e.g., Paracetamol"
-              />
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Time</Text>
-              <TouchableOpacity 
-                style={styles.timeInput}
-                onPress={() => setShowTimePicker(true)}
-              >
-                <Text>{formatTime(newMedicine.time)}</Text>
-                <Ionicons name="time" size={20} color="#666" />
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Dosage</Text>
-              <TextInput
-                style={styles.input}
-                value={newMedicine.dosage}
-                onChangeText={text => setNewMedicine({...newMedicine, dosage: text})}
-                placeholder="e.g., 1 pill, 5ml"
-              />
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Days</Text>
-              <View style={styles.daysContainer}>
-                {daysOfWeek.map(day => (
-                  <TouchableOpacity
-                    key={day.id}
-                    style={[
-                      styles.dayButton,
-                      newMedicine.days.includes(day.id) && styles.dayButtonActive
-                    ]}
-                    onPress={() => toggleDay(day.id)}
-                  >
-                    <Text style={newMedicine.days.includes(day.id) ? styles.dayTextActive : styles.dayText}>
-                      {day.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-            
-            <View style={styles.buttonGroup}>
-              <TouchableOpacity 
-                style={[styles.button, styles.cancelButton]}
-                onPress={() => setIsAdding(false)}
-              >
-                <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.button, styles.addButton]}
-                onPress={addMedicine}
-              >
-                <Text style={styles.buttonText}>Add Medicine</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+
         
-        {!isAdding && (
-          <TouchableOpacity 
-            style={styles.addButton}
-            onPress={() => {
-              setIsAdding(true);
-              setEditingId(null);
-            }}
-          >
-            <Ionicons name="add" size={24} color="#333" />
-            <Text style={styles.addButtonText}>Add New Medicine Button</Text>
-          </TouchableOpacity>
-        )}
       </ScrollView>
+      
+      <TouchableOpacity 
+        style={styles.floatingAddButton}
+        onPress={() => setShowMedicineModal(true)}
+      >
+        <Ionicons name="add" size={24} color="white" />
+      </TouchableOpacity>
+
       
       <BottomMenu activeRoute="Schedule" />
       
       {showTimePicker && (
         <DateTimePicker
-          value={isAdding ? newMedicine.time : (medicines.find(m => m.id === editingId)?.time || new Date())}
+          value={medicines.find(m => m.id === editingId)?.time || new Date()}
           mode="time"
           is24Hour={true}
           display="default"
           onChange={handleTimeChange}
         />
       )}
+      
+      <AddNewMedicineSchedule
+        visible={showMedicineModal}
+        onClose={() => setShowMedicineModal(false)}
+        onAdd={addMedicine}
+      />
+      
+      <EditMedicineSchedule
+        visible={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        onUpdate={async (updatedMedicine) => {
+          const updatedMedicines = medicines.map(med => 
+            med.id === updatedMedicine.id ? updatedMedicine : med
+          );
+          setMedicines(updatedMedicines);
+          
+          // Update notifications if enabled
+          if (notificationsEnabled) {
+            try {
+              await scheduleMedicineReminder(updatedMedicine);
+            } catch (error) {
+              console.error('Failed to update notification:', error);
+            }
+          }
+        }}
+        medicine={selectedMedicine}
+      />
     </View>
   );
 };
@@ -296,17 +325,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    justifyContent: 'space-between',
   },
   header: {
-    fontSize: 24,
+    fontSize: 30,
     fontWeight: 'bold',
     color: '#333',
-    marginRight: 10,
-    
+    flex: 1,
   },
   icon: {
     width: 40,
     height: 40,
+    marginRight: 10,
+  },
+  notificationToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  notificationText: {
+    fontSize: 14,
+    color: '#666',
+    marginRight: 8,
   },
   medicineCard: {
     backgroundColor: 'white',
@@ -376,10 +415,21 @@ const styles = StyleSheet.create({
     marginTop: 8,
     gap: 8,
   },
-  addButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '600',
+  floatingAddButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 28,
+    backgroundColor: '#51ffc6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
   addForm: {
     backgroundColor: '#fff',
