@@ -69,27 +69,39 @@ const OTPScreen = () => {
 
     setIsVerifying(true);
     try {
-      // const response = await fetch(`${API_URL}/otps/verify-otp`, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify({ 
-      //     phone: phone,
-      //     otp: code 
-      //   }),
-      // });
+      const response = await fetch(`${API_URL}/otps/verify-otp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          phone: phone,
+          otp: code 
+        }), 
+      });
 
-      // const data = await response.json();
-      // if (response.ok) {
-      //   await login({ ...data.customer, token: data.token });
-      //   navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
-      // } else {
-      //   Alert.alert('Error', data.error || 'Verification failed');
-      // }
-
-      // Simulate success and navigate to Home
-      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      const data = await response.json();
+      if (response.ok) {
+        if (!data.customer.hasPassword) {
+          // User needs to set password
+          navigation.navigate('SettingPasswordScreen', { 
+            phone: phone,
+            customerId: data.customer.id 
+          });
+        } else {
+          // User already has password, login and go to home
+          const customerData = {
+            ...data.customer,
+            // Add token only if it exists in the response
+            ...(data.token && { token: data.token })
+          };
+          
+          await login(customerData);
+          navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+        }
+      } else {
+        Alert.alert('Error', data.error || 'Verification failed');
+      }
     } catch (error) {
       console.error('Error verifying OTP:', error);
       Alert.alert('Error', 'Failed to verify OTP. Please try again.');
@@ -108,12 +120,17 @@ const OTPScreen = () => {
     let timeLeft = 30;
     
     try {
+      const payload = { phone };
+      if (email) {
+        payload.email = email;
+      }
+
       const response = await fetch(`${API_URL}/otps/request-otp`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();

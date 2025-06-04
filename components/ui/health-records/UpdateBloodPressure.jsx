@@ -1,21 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard } from 'react-native';
 
-const UpdateBloodPressure = ({ visible, onClose, onUpdate }) => {
+const UpdateBloodPressure = ({ visible, onClose, onUpdate, currentData }) => {
   const [date, setDate] = useState('');
   const [systolic, setSystolic] = useState('');
   const [diastolic, setDiastolic] = useState('');
   const [pulse, setPulse] = useState('');
 
   useEffect(() => {
-    // Reset form when modal is closed
+    // Reset form when modal is closed or populate with current data when opened
     if (!visible) {
       setDate('');
       setSystolic('');
       setDiastolic('');
       setPulse('');
+    } else if (currentData) {
+      // Pre-populate with current data if available
+      setDate(currentData.updated_at ? new Date(currentData.updated_at).toISOString().split('T')[0] : '');
+      setSystolic(currentData.blood_pressure_systolic?.toString() || '');
+      setDiastolic(currentData.blood_pressure_diastolic?.toString() || '');
+      setPulse(''); // Pulse is not stored in current data structure
     }
-  }, [visible]);
+  }, [visible, currentData]);
 
   const handleUpdate = () => {
     if (!date || !systolic || !diastolic) return;
@@ -62,6 +68,16 @@ const UpdateBloodPressure = ({ visible, onClose, onUpdate }) => {
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>Update Blood Pressure</Text>
               <Text style={styles.modalSubtitle}>Record your blood pressure readings to track your cardiovascular health over time.</Text>
+              
+              {currentData && (currentData.blood_pressure_systolic || currentData.blood_pressure_diastolic) && (
+                <View style={styles.currentDataContainer}>
+                  <Text style={styles.currentDataTitle}>Current Blood Pressure:</Text>
+                  <Text style={styles.currentDataText}>
+                    {currentData.blood_pressure_systolic || 'N/A'}/{currentData.blood_pressure_diastolic || 'N/A'} mmHg
+                  </Text>
+                  <Text style={styles.currentDataText}>Last Updated: {currentData.updated_at ? new Date(currentData.updated_at).toLocaleDateString() : 'Never'}</Text>
+                </View>
+              )}
               
               <TextInput
                 style={[styles.modalInput, !validateDateFormat(date) && date.length > 0 && styles.inputError]}
@@ -241,6 +257,20 @@ const styles = StyleSheet.create({
     fontFamily: 'DarkerGrotesque',
     marginTop: -15,
     marginBottom: 15,
+  },
+  currentDataContainer: {
+    marginBottom: 20,
+  },
+  currentDataTitle: {
+    fontFamily: 'DarkerGrotesque-Bold',
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 5,
+  },
+  currentDataText: {
+    fontFamily: 'DarkerGrotesque',
+    fontSize: 14,
+    color: '#666',
   },
 });
 

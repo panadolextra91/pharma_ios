@@ -7,7 +7,7 @@ const GENDER_OPTIONS = [
   { label: 'Other', value: 'other' },
 ];
 
-const UpdateBMI = ({ visible, onClose, onUpdate }) => {
+const UpdateBMI = ({ visible, onClose, onUpdate, currentData }) => {
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState('');
   const [weight, setWeight] = useState('');
@@ -15,11 +15,20 @@ const UpdateBMI = ({ visible, onClose, onUpdate }) => {
   const [showGenderModal, setShowGenderModal] = useState(false);
 
   useEffect(() => {
-    // Reset form when modal is closed
+    // Reset form when modal is closed or populate with current data when opened
     if (!visible) {
       setDob('');
+      setGender('');
+      setWeight('');
+      setHeight('');
+    } else if (currentData) {
+      // Pre-populate with current data if available
+      setDob(currentData.date_of_birth || '');
+      setGender(currentData.gender?.toLowerCase() || '');
+      setWeight(currentData.weight?.toString() || '');
+      setHeight(currentData.height?.toString() || '');
     }
-  }, [visible]);
+  }, [visible, currentData]);
 
   const handleUpdate = () => {
     if (!dob || !gender || !weight || !height) return;
@@ -67,6 +76,17 @@ const UpdateBMI = ({ visible, onClose, onUpdate }) => {
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>Calculate BMI</Text>
               <Text style={styles.modalSubtitle}>Body mass index (BMI) is a measure of body fat based on height and weight that applies to adult men and women.</Text>
+              
+              {currentData && currentData.bmi && (
+                <View style={styles.currentDataContainer}>
+                  <Text style={styles.currentDataTitle}>Current BMI Data:</Text>
+                  <Text style={styles.currentDataText}>BMI: {currentData.bmi}</Text>
+                  <Text style={styles.currentDataText}>Weight: {currentData.weight ? `${currentData.weight} kg` : 'Not set'}</Text>
+                  <Text style={styles.currentDataText}>Height: {currentData.height ? `${currentData.height} cm` : 'Not set'}</Text>
+                  <Text style={styles.currentDataText}>Last Updated: {currentData.updated_at ? new Date(currentData.updated_at).toLocaleDateString() : 'Never'}</Text>
+                </View>
+              )}
+              
               <TextInput
                   style={[styles.modalInput, !validateDateFormat(dob) && dob.length > 0 && styles.inputError]}
                   value={dob}
@@ -124,10 +144,13 @@ const UpdateBMI = ({ visible, onClose, onUpdate }) => {
                 style={styles.modalInput}
                 value={height}
                 onChangeText={setHeight}
-                placeholder="Height (m)"
+                placeholder="Height (cm)"
                 placeholderTextColor="#999"
                 keyboardType="numeric"
               />
+              {height && (parseFloat(height) < 50 || parseFloat(height) > 300) && (
+                <Text style={styles.errorText}>Please enter a valid height (50-300 cm)</Text>
+              )}
               <View style={styles.modalButtons}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.cancelButton]}
@@ -278,6 +301,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'DarkerGrotesque',
     marginTop: 5,
+  },
+  currentDataContainer: {
+    marginBottom: 20,
+  },
+  currentDataTitle: {
+    fontFamily: 'DarkerGrotesque-Bold',
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 8,
+  },
+  currentDataText: {
+    fontFamily: 'DarkerGrotesque',
+    fontSize: 14,
+    color: '#333',
   },
 });
 

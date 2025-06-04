@@ -7,7 +7,7 @@ const GENDER_OPTIONS = [
   { label: 'Other', value: 'other' },
 ];
 
-const UpdateBMR = ({ visible, onClose, onUpdate }) => {
+const UpdateBMR = ({ visible, onClose, onUpdate, currentData }) => {
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState('');
   const [weight, setWeight] = useState('');
@@ -15,11 +15,20 @@ const UpdateBMR = ({ visible, onClose, onUpdate }) => {
   const [showGenderModal, setShowGenderModal] = useState(false);
 
   useEffect(() => {
-    // Reset form when modal is closed
+    // Reset form when modal is closed or populate with current data when opened
     if (!visible) {
       setDob('');
+      setGender('');
+      setWeight('');
+      setHeight('');
+    } else if (currentData) {
+      // Pre-populate with current data if available
+      setDob(currentData.date_of_birth || '');
+      setGender(currentData.gender?.toLowerCase() || '');
+      setWeight(currentData.weight?.toString() || '');
+      setHeight(currentData.height?.toString() || '');
     }
-  }, [visible]);
+  }, [visible, currentData]);
 
   const handleUpdate = () => {
     if (!dob || !gender || !weight || !height) return;
@@ -67,6 +76,17 @@ const UpdateBMR = ({ visible, onClose, onUpdate }) => {
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>Calculate BMR</Text>
               <Text style={styles.modalSubtitle}>The basal metabolic rate (BMR) is the amount of energy needed while resting in a temperate environment when the digestive system is inactive.</Text>
+              
+              {currentData && currentData.bmr && (
+                <View style={styles.currentDataContainer}>
+                  <Text style={styles.currentDataTitle}>Current BMR Data:</Text>
+                  <Text style={styles.currentDataText}>BMR: {currentData.bmr} calories/day</Text>
+                  <Text style={styles.currentDataText}>Weight: {currentData.weight ? `${currentData.weight} kg` : 'Not set'}</Text>
+                  <Text style={styles.currentDataText}>Height: {currentData.height ? `${currentData.height} cm` : 'Not set'}</Text>
+                  <Text style={styles.currentDataText}>Last Updated: {currentData.updated_at ? new Date(currentData.updated_at).toLocaleDateString() : 'Never'}</Text>
+                </View>
+              )}
+              
               <TextInput
                   style={[styles.modalInput, !validateDateFormat(dob) && dob.length > 0 && styles.inputError]}
                   value={dob}
@@ -124,10 +144,13 @@ const UpdateBMR = ({ visible, onClose, onUpdate }) => {
                 style={styles.modalInput}
                 value={height}
                 onChangeText={setHeight}
-                placeholder="Height (m)"
+                placeholder="Height (cm)"
                 placeholderTextColor="#999"
                 keyboardType="numeric"
               />
+              {height && (parseFloat(height) < 50 || parseFloat(height) > 300) && (
+                <Text style={styles.errorText}>Please enter a valid height (50-300 cm)</Text>
+              )}
               <View style={styles.modalButtons}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.cancelButton]}
@@ -278,6 +301,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'DarkerGrotesque',
     marginTop: 5,
+  },
+  currentDataContainer: {
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 20,
+  },
+  currentDataTitle: {
+    fontFamily: 'DarkerGrotesque-Bold',
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 5,
+  },
+  currentDataText: {
+    fontFamily: 'DarkerGrotesque',
+    fontSize: 14,
+    color: '#666',
   },
 });
 

@@ -8,14 +8,15 @@ import {
   Animated, 
   Easing 
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useCart } from '../../context/CartContext';
 import { Ionicons, MaterialIcons, AntDesign, MaterialCommunityIcons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
 const menuItems = [
   { name: 'Home', icon: 'home', label: 'Homepage', iconType: 'ant' },
-  { name: 'Order', icon: 'shoppingcart', label: 'Order', iconType: 'ant' },
+  { name: 'Cart', icon: 'shoppingcart', label: 'Cart', iconType: 'ant' },
   { name: 'Consult', icon: 'customerservice', label: 'Consult', iconType: 'ant' },
   { name: 'Invoice', icon: 'clipboard-text-outline', label: 'Invoice', iconType: 'material-community' },
   { name: 'Profile', icon: 'account-circle-outline', label: 'Profile', iconType: 'material-community' },
@@ -23,6 +24,7 @@ const menuItems = [
 
 const BottomMenu = ({ activeRoute }) => {
   const navigation = useNavigation();
+  const { cartCount, refreshCartCount } = useCart();
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -49,9 +51,17 @@ const BottomMenu = ({ activeRoute }) => {
     return () => pulseAnim.stopAnimation();
   }, []);
 
+  // Refresh cart count when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshCartCount();
+    }, [])
+  );
+
   const renderIcon = (item) => {
     const isActive = activeRoute === item.name;
     const isConsult = item.name === 'Consult';
+    const isCart = item.name === 'Cart';
     const color = isConsult ? '#000' : (isActive ? '#51ffc6' : '#888');
     const size = 24;
 
@@ -72,6 +82,17 @@ const BottomMenu = ({ activeRoute }) => {
           <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
             {icon()}
           </Animated.View>
+        </View>
+      );
+    }
+    
+    if (isCart && cartCount > 0) {
+      return (
+        <View>
+          {icon()}
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{cartCount > 99 ? '99+' : cartCount}</Text>
+          </View>
         </View>
       );
     }
@@ -155,6 +176,26 @@ const styles = StyleSheet.create({
     color: '#888',
     fontFamily: 'DarkerGrotesque',
     fontSize: 15,
+  },
+  badge: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    backgroundColor: '#ff5151',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#fff',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: 'DarkerGrotesque-Bold',
   },
 });
 

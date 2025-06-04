@@ -1,18 +1,26 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Dimensions, Modal, TextInput, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Dimensions, Modal, TextInput, Platform, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { useFonts } from 'expo-font';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
 import BottomMenu from '../components/ui/BottomMenu';
 import AddNewRecord from '../components/ui/health-records/AddNewRecord';
 import AddNewAllergy from '../components/ui/health-records/AddNewAllergy';
+import MetricsCard from '../components/ui/health-records/MetricsCard';
+import AllergiesList from '../components/ui/health-records/AllergiesList';
+import RecordCard from '../components/ui/health-records/RecordCard';
 import Fontisto from '@expo/vector-icons/Fontisto';
 import UpdateBMI from '../components/ui/health-records/UpdateBMI';
 import UpdateBloodPressure from '../components/ui/health-records/UpdateBloodPressure';
 import UpdateBloodType from '../components/ui/health-records/UpdateBloodType';
 import UpdateBMR from '../components/ui/health-records/UpdateBMR';
+import { API_URL } from '../config';
+import { useAuth } from '../context/AuthContext';
+
 const { width } = Dimensions.get('window');
 
 const HealthRecords = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('all');
   const [showAllergyModal, setShowAllergyModal] = useState(false);
   const [showRecordModal, setShowRecordModal] = useState(false);
@@ -20,355 +28,619 @@ const HealthRecords = () => {
   const [showUpdateBPModal, setShowUpdateBPModal] = useState(false);
   const [showUpdateBloodTypeModal, setShowUpdateBloodTypeModal] = useState(false);
   const [showUpdateBMRModal, setShowUpdateBMRModal] = useState(false);
+  
+  // Loading and refresh states
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [uploadingRecord, setUploadingRecord] = useState(false);
 
+  // Data states
   const [healthMetrics, setHealthMetrics] = useState({
-    bmi: { value: '22.5', category: 'Normal', date: '2024-03-15' },
-    bmr: { value: '1800', category: 'High', date: '2024-03-15' },
-    bloodPressure: { systolic: '120', diastolic: '80', date: '2024-03-15' },
-    bloodType: 'O+',
-    allergies: ['Penicillin', 'Pollen', 'Shellfish', 'Dust mites']
+    bmi: { value: 'N/A', category: 'Unknown', date: null },
+    bmr: { value: 'N/A', category: 'Unknown', date: null },
+    bloodPressure: { systolic: 'N/A', diastolic: 'N/A', date: null },
+    bloodType: 'Unknown',
+    allergies: []
   });
 
-  const [records, setRecords] = useState([
-    { 
-      id: '1', 
-      type: 'lab', 
-      title: 'Complete Blood Count', 
-      date: '2024-03-15', 
-      doctor: 'Dr. Sarah Johnson',
-      description: 'Hemoglobin: 14.2 g/dL, WBC: 7.5 K/µL'
-    },
-    { 
-      id: '2', 
-      type: 'prescription', 
-      title: 'Amoxicillin', 
-      date: '2024-03-10', 
-      doctor: 'Dr. Michael Chen',
-      description: '500mg - Take twice daily for 10 days'
-    },
-    { 
-      id: '3', 
-      type: 'lab', 
-      title: 'Lipid Panel', 
-      date: '2024-03-05', 
-      doctor: 'Dr. Emily Wilson',
-      description: 'Cholesterol: 180 mg/dL, Triglycerides: 120 mg/dL'
-    },
-    { 
-      id: '4', 
-      type: 'prescription', 
-      title: 'Ibuprofen', 
-      date: '2024-03-01', 
-      doctor: 'Dr. Michael Chen',
-      description: '400mg - Take as needed for pain'
-    },
-  ]);
+  const [records, setRecords] = useState([]);
+  const [allRecords, setAllRecords] = useState([]); // Store all records for filtering
+  const [rawHealthData, setRawHealthData] = useState(null); // Store raw data from backend
 
   const [fontsLoaded] = useFonts({
     'DarkerGrotesque': require('@expo-google-fonts/darker-grotesque').DarkerGrotesque_500Medium,
     'DarkerGrotesque-Bold': require('@expo-google-fonts/darker-grotesque').DarkerGrotesque_700Bold,
   });
 
+  // Fetch health metrics from backend
+  const fetchHealthMetrics = async () => {
+    if (!user?.token || !user?.id) return;
+
+    try {
+      console.log('🏥 Fetching health metrics for customer:', user.id);
+      
+      const response = await fetch(`${API_URL}/health-metrics/customer/${user.id}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log('✅ Health metrics fetched successfully:', data);
+        
+        // Update health metrics state
+        setHealthMetrics(prev => ({
+          ...prev,
+          bmi: {
+            value: data.bmi ? data.bmi.toString() : 'N/A',
+            category: getBMICategory(data.bmi),
+            date: data.updated_at ? new Date(data.updated_at).toISOString().split('T')[0] : null
+          },
+          bmr: {
+            value: data.bmr ? data.bmr.toString() : 'N/A',
+            category: getBMRCategory(data.bmr, data.gender),
+            date: data.updated_at ? new Date(data.updated_at).toISOString().split('T')[0] : null
+          },
+          bloodPressure: {
+            systolic: data.blood_pressure_systolic || 'N/A',
+            diastolic: data.blood_pressure_diastolic || 'N/A',
+            date: data.updated_at ? new Date(data.updated_at).toISOString().split('T')[0] : null
+          },
+          bloodType: data.blood_type || 'Unknown'
+        }));
+        setRawHealthData(data);
+      } else {
+        console.log('ℹ️ No health metrics found for customer');
+        // Keep default values if no metrics found
+      }
+    } catch (error) {
+      console.error('❌ Error fetching health metrics:', error);
+    }
+  };
+
+  // Fetch allergies from backend
+  const fetchAllergies = async () => {
+    if (!user?.token) return;
+
+    try {
+      console.log('🤧 Fetching allergies for customer:', user.id);
+      
+      const response = await fetch(`${API_URL}/allergies`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.status === 'success') {
+        console.log('✅ Allergies fetched successfully:', result.data);
+        
+        // Store full allergy objects for delete operations
+        setHealthMetrics(prev => ({
+          ...prev,
+          allergies: result.data
+        }));
+      } else {
+        console.log('ℹ️ No allergies found for customer');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching allergies:', error);
+    }
+  };
+
+  // Delete allergy
+  const deleteAllergy = async (allergyId) => {
+    if (!user?.token) return false;
+
+    try {
+      console.log('🗑️ Deleting allergy:', allergyId);
+
+      const response = await fetch(`${API_URL}/allergies/${allergyId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.status === 'success') {
+        console.log('✅ Allergy deleted successfully');
+        
+        // Refresh allergies
+        await fetchAllergies();
+        return true;
+      } else {
+        console.error('❌ Failed to delete allergy:', result.message);
+        Alert.alert('Error', result.message || 'Failed to delete allergy');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Error deleting allergy:', error);
+      Alert.alert('Error', 'Failed to delete allergy. Please try again.');
+      return false;
+    }
+  };
+
+  // Fetch health records from backend
+  const fetchHealthRecords = async () => {
+    if (!user?.token || !user?.id) return;
+
+    try {
+      console.log('📋 Fetching health records for customer:', user.id);
+      
+      const response = await fetch(`${API_URL}/health-records/customer/${user.id}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log('✅ Health records fetched successfully:', data.length, 'records');
+        
+        // Transform backend data to match frontend format
+        const transformedRecords = data.map(record => ({
+          id: record.id.toString(),
+          type: getFrontendRecordType(record.record_type),
+          title: record.title,
+          date: record.date_recorded,
+          doctor: record.provider_name || 'Unknown Provider',
+          description: record.description || 'No description available',
+          fileUrl: record.fileUrl || null
+        }));
+
+        setAllRecords(transformedRecords);
+        setRecords(transformedRecords);
+      } else {
+        console.log('ℹ️ No health records found for customer');
+        setAllRecords([]);
+        setRecords([]);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching health records:', error);
+      Alert.alert('Error', 'Failed to load health records. Please try again.');
+    }
+  };
+
+  // Fetch health records by type from backend
+  const fetchHealthRecordsByType = async (recordType) => {
+    if (!user?.token) return;
+
+    try {
+      console.log('📋 Fetching health records by type:', recordType);
+      
+      const response = await fetch(`${API_URL}/health-records/type/${recordType}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log('✅ Health records by type fetched successfully:', data.length, 'records');
+        
+        // Transform backend data to match frontend format
+        const transformedRecords = data.map(record => ({
+          id: record.id.toString(),
+          type: getFrontendRecordType(record.record_type),
+          title: record.title,
+          date: record.date_recorded,
+          doctor: record.provider_name || 'Unknown Provider',
+          description: record.description || 'No description available',
+          fileUrl: record.fileUrl || null
+        }));
+
+        setRecords(transformedRecords);
+      } else {
+        console.log('ℹ️ No health records found for type:', recordType);
+        setRecords([]);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching health records by type:', error);
+      Alert.alert('Error', 'Failed to load health records. Please try again.');
+    }
+  };
+
+  // Map frontend tab values to backend record types
+  const getBackendRecordType = (tabType) => {
+    switch(tabType) {
+      case 'lab': return 'LAB_RESULT';
+      case 'prescription': return 'PRESCRIPTION';
+      case 'note': return 'DOCTOR_NOTE';
+      default: return null;
+    }
+  };
+
+  // Map backend record types to frontend display types
+  const getFrontendRecordType = (backendType) => {
+    switch(backendType) {
+      case 'LAB_RESULT': return 'lab';
+      case 'PRESCRIPTION': return 'prescription';
+      case 'DOCTOR_NOTE': return 'note';
+      default: return 'unknown';
+    }
+  };
+
+  // Create new health record with file upload
+  const createHealthRecord = async (recordData, file = null) => {
+    if (!user?.token || !user?.id) return false;
+
+    try {
+      setUploadingRecord(true);
+      console.log('📋 Creating health record:', recordData);
+
+      const backendRecordType = getBackendRecordType(recordData.type);
+      if (!backendRecordType) {
+        Alert.alert('Error', 'Invalid record type selected.');
+        setUploadingRecord(false);
+        return false;
+      }
+
+      const formData = new FormData();
+      formData.append('customer_id', user.id.toString());
+      formData.append('record_type', backendRecordType);
+      formData.append('title', recordData.title);
+      formData.append('description', recordData.description || '');
+      formData.append('provider_name', recordData.doctor || '');
+      formData.append('date_recorded', recordData.date || new Date().toISOString().split('T')[0]);
+
+      if (file) {
+        console.log('📎 Adding file to form data:', file.name);
+        formData.append('file', {
+          uri: file.uri,
+          type: file.mimeType,
+          name: file.name,
+        });
+      }
+
+      const response = await fetch(`${API_URL}/health-records`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${user.token}`,
+          'Content-Type': 'multipart/form-data',
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log('✅ Health record created successfully:', data);
+        
+        // Refresh records
+        await fetchHealthRecords();
+        return true;
+      } else {
+        console.error('❌ Failed to create health record:', data.error);
+        Alert.alert('Error', data.error || 'Failed to create health record');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Error creating health record:', error);
+      Alert.alert('Error', 'Failed to create health record. Please try again.');
+      return false;
+    } finally {
+      setUploadingRecord(false);
+    }
+  };
+
+  // Helper functions for categorizing metrics
+  const getBMICategory = (bmi) => {
+    if (!bmi) return 'Unknown';
+    if (bmi < 18.5) return 'Underweight';
+    if (bmi < 25) return 'Normal';
+    if (bmi < 30) return 'Overweight';
+    return 'Obese';
+  };
+
+  const getBMRCategory = (bmr, gender) => {
+    if (!bmr) return 'Unknown';
+    if (gender === 'MALE') {
+      if (bmr < 1600) return 'Low';
+      if (bmr > 2200) return 'High';
+      return 'Normal';
+    } else {
+      if (bmr < 1400) return 'Low';
+      if (bmr > 1800) return 'High';
+      return 'Normal';
+    }
+  };
+
+  // Initialize data on component mount
+  useEffect(() => {
+    const initializeData = async () => {
+      setLoading(true);
+      await Promise.all([
+        fetchHealthMetrics(),
+        fetchAllergies(),
+        fetchHealthRecords()
+      ]);
+      setLoading(false);
+    };
+
+    if (user?.token && user?.id) {
+      initializeData();
+    }
+  }, [user]);
+
+  // Handle refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      fetchHealthMetrics(),
+      fetchAllergies(),
+      fetchHealthRecords()
+    ]);
+    setRefreshing(false);
+  };
+
+  // Handle tab change for record filtering
+  const handleTabChange = (newTab) => {
+    setActiveTab(newTab);
+    
+    if (newTab === 'all') {
+      // Show all records that were fetched initially
+      setRecords(allRecords);
+    } else {
+      // Fetch records for specific type
+      const backendType = getBackendRecordType(newTab);
+      if (backendType) {
+        fetchHealthRecordsByType(backendType);
+      }
+    }
+  };
+
+  // Update health metrics via API
+  const updateHealthMetrics = async (metricsData) => {
+    if (!user?.token || !user?.id) return false;
+
+    try {
+      setMetricsLoading(true);
+      console.log('📊 Updating health metrics:', metricsData);
+
+      const response = await fetch(`${API_URL}/health-metrics/update`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`,
+        },
+        body: JSON.stringify({
+          customer_id: user.id,
+          ...metricsData
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log('✅ Health metrics updated successfully:', data);
+        
+        // Refresh metrics data
+        await fetchHealthMetrics();
+        return true;
+      } else {
+        console.error('❌ Failed to update health metrics:', data.error);
+        Alert.alert('Error', data.error || 'Failed to update health metrics');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Error updating health metrics:', error);
+      Alert.alert('Error', 'Failed to update health metrics. Please try again.');
+      return false;
+    } finally {
+      setMetricsLoading(false);
+    }
+  };
+
+  // Add new allergy via API
+  const addAllergy = async (allergyName) => {
+    if (!user?.token || !user?.id) return false;
+
+    try {
+      console.log('🤧 Adding new allergy:', allergyName);
+
+      const response = await fetch(`${API_URL}/allergies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`,
+        },
+        body: JSON.stringify({
+          name: allergyName,
+          description: `Allergy to ${allergyName}`,
+          customer_id: user.id
+        }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.status === 'success') {
+        console.log('✅ Allergy added successfully:', result.data);
+        
+        // Refresh allergies
+        await fetchAllergies();
+        return true;
+      } else {
+        console.error('❌ Failed to add allergy:', result.message);
+        Alert.alert('Error', result.message || 'Failed to add allergy');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Error adding allergy:', error);
+      Alert.alert('Error', 'Failed to add allergy. Please try again.');
+      return false;
+    }
+  };
+
+  // Event handlers
+  const handleAddAllergy = async (allergy) => {
+    const success = await addAllergy(allergy);
+    if (success) {
+      setShowAllergyModal(false);
+    }
+  };
+
+  const handleDeleteAllergy = (allergyId, allergyName) => {
+    Alert.alert(
+      'Delete Allergy',
+      `Are you sure you want to delete "${allergyName}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: () => deleteAllergy(allergyId)
+        }
+      ]
+    );
+  };
+
+  const handleAddRecord = async (recordData, file) => {
+    const success = await createHealthRecord(recordData, file);
+    if (success) {
+      setShowRecordModal(false);
+    }
+  };
+
+  const handleUpdateBMI = async (data) => {
+    console.log('📊 BMI update triggered with data:', data);
+    
+    const metricsData = {
+      weight: parseFloat(data.weight.replace(',', '.')),
+      height: parseFloat(data.height.replace(',', '.')),
+      gender: data.gender?.toUpperCase(),
+      date_of_birth: data.dob
+    };
+
+    const success = await updateHealthMetrics(metricsData);
+    if (success) {
+      setShowUpdateBMIModal(false);
+    }
+  };
+
+  const handleUpdateBP = async (data) => {
+    console.log('🩺 Blood pressure update triggered with data:', data);
+    
+    const metricsData = {
+      blood_pressure_systolic: parseInt(data.systolic),
+      blood_pressure_diastolic: parseInt(data.diastolic)
+    };
+
+    const success = await updateHealthMetrics(metricsData);
+    if (success) {
+      setShowUpdateBPModal(false);
+    }
+  };
+
+  const handleUpdateBloodType = async (bloodType) => {
+    console.log('🩸 Blood type update triggered:', bloodType);
+    
+    const metricsData = {
+      blood_type: bloodType
+    };
+
+    const success = await updateHealthMetrics(metricsData);
+    if (success) {
+      setShowUpdateBloodTypeModal(false);
+    }
+  };
+
+  const handleUpdateBMR = async (data) => {
+    console.log('🔥 BMR update triggered with data:', data);
+    
+    const metricsData = {
+      weight: parseFloat(data.weight.replace(',', '.')),
+      height: parseFloat(data.height.replace(',', '.')),
+      gender: data.gender?.toUpperCase(),
+      date_of_birth: data.dob
+    };
+
+    const success = await updateHealthMetrics(metricsData);
+    if (success) {
+      setShowUpdateBMRModal(false);
+    }
+  };
+
   if (!fontsLoaded) {
     return null;
   }
 
-  const filteredRecords = activeTab === 'all' 
-    ? records 
-    : records.filter(record => record.type === activeTab);
-
-  const getIconName = (type) => {
-    switch(type) {
-      case 'lab': return 'science';
-      case 'prescription': return 'medication';
-      case 'note': return 'note';
-      default: return 'description';
-    }
-  };
-
-  const getTypeLabel = (type) => {
-    switch(type) {
-      case 'lab': return 'Lab Results';
-      case 'prescription': return 'Prescription';
-      case 'note': return 'Doctor\'s Note';
-      default: return 'Record';
-    }
-  };
-
-  const handleAddAllergy = (allergy) => {
-    setHealthMetrics(prev => ({
-      ...prev,
-      allergies: [...prev.allergies, allergy]
-    }));
-  };
-
-  const handleAddRecord = (newRecord) => {
-    // Add the new record to the records state
-    setRecords(prev => {
-      const updatedRecords = [...prev, newRecord];
-      return updatedRecords;
-    });
-    
-    // Close the modal after adding
-    setShowRecordModal(false);
-  };
-
-  const handleUpdateBP = (data) => {
-    setHealthMetrics(prev => ({
-      ...prev,
-      bloodPressure: {
-        systolic: data.systolic,
-        diastolic: data.diastolic,
-        date: data.date,
-        pulse: data.pulse || ''
-      }
-    }));
-  };
-  
-  // Common function to calculate both BMI and BMR
-  const calculateMetrics = (data) => {
-    console.log('Calculating metrics with data:', data);
-    
-    // Replace commas with periods for decimal parsing
-    const weightStr = data.weight.replace(',', '.');
-    const heightStr = data.height.replace(',', '.');
-    
-    const weightKg = parseFloat(weightStr);
-    const heightM = parseFloat(heightStr);
-    
-    console.log('Parsed values:', { weightKg, heightM });
-    
-    // Validate inputs
-    if (isNaN(weightKg) || isNaN(heightM) || heightM === 0 || !data.dob || !data.gender) {
-      console.log('Invalid inputs, calculation aborted');
-      return null;
-    }
-    
-    // Calculate BMI
-    const bmi = weightKg / (heightM * heightM);
-    const roundedBMI = Math.round(bmi * 10) / 10; // Round to 1 decimal place
-    
-    // Determine BMI category
-    let bmiCategory;
-    if (bmi < 18.5) bmiCategory = 'Underweight';
-    else if (bmi < 25) bmiCategory = 'Normal';
-    else if (bmi < 30) bmiCategory = 'Overweight';
-    else bmiCategory = 'Obese';
-    
-    // Calculate BMR
-    const age = new Date().getFullYear() - parseInt(data.dob.split('-')[0]);
-    const heightCm = heightM * 100;
-    
-    let bmr;
-    if (data.gender === 'male') {
-      bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
-    } else {
-      bmr = 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
-    }
-    
-    bmr = Math.round(bmr);
-    
-    // Determine BMR category
-    let bmrCategory;
-    if (data.gender === 'male') {
-      if (bmr < 1600) bmrCategory = 'Low';
-      else if (bmr > 2200) bmrCategory = 'High';
-      else bmrCategory = 'Normal';
-    } else {
-      if (bmr < 1400) bmrCategory = 'Low';
-      else if (bmr > 1800) bmrCategory = 'High';
-      else bmrCategory = 'Normal';
-    }
-    
-    const today = new Date().toISOString().split('T')[0];
-    
-    return {
-      bmi: {
-        value: roundedBMI.toString(),
-        category: bmiCategory,
-        date: today
-      },
-      bmr: {
-        value: bmr.toString(),
-        category: bmrCategory,
-        date: today
-      }
-    };
-  };
-  
-  const handleUpdateBMI = (data) => {
-    console.log('BMI update triggered with data:', data);
-    
-    const metrics = calculateMetrics(data);
-    if (!metrics) return;
-    
-    setHealthMetrics(prev => {
-      const newMetrics = {
-        ...prev,
-        ...metrics
-      };
-      console.log('Updated metrics:', newMetrics);
-      return newMetrics;
-    });
-  };
-  
-  const handleUpdateBloodType = (bloodType) => {
-    setHealthMetrics(prev => ({
-      ...prev,
-      bloodType: bloodType
-    }));
-  };
-  
-  const handleUpdateBMR = (data) => {
-    console.log('BMR update triggered with data:', data);
-    
-    const metrics = calculateMetrics(data);
-    if (!metrics) return;
-    
-    setHealthMetrics(prev => {
-      const newMetrics = {
-        ...prev,
-        ...metrics
-      };
-      console.log('Updated metrics:', newMetrics);
-      return newMetrics;
-    });
-  };
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#51ffc6" />
+          <Text style={styles.loadingText}>Loading health records...</Text>
+        </View>
+        <BottomMenu activeRoute="HealthRecords" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.scrollView}>
+      <ScrollView 
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         <View style={styles.headerContainer}>
           <Image source={require('../assets/Records.png')} style={styles.icon} />
           <Text style={styles.header}>Health Records</Text>
         </View>
         
-        <Text style={styles.sectionTitle}>Health Metrics</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.metricsScroll} contentContainerStyle={styles.metricsContainer}>
-          <TouchableOpacity onPress={() => setShowUpdateBMIModal(true)} activeOpacity={0.8}>
-            <View style={styles.metricCard}>
-              <MaterialIcons name="monitor-weight" size={24} color="#51ffb4" shadowColor="#000" shadowOffset={{ width: 0, height: 2 }} shadowOpacity={0.5} shadowRadius={1}/>
-              <Text style={styles.metricTitle}>BMI</Text>
-              <Text style={styles.metricValue}>{healthMetrics.bmi.value}</Text>
-              <Text style={styles.metricSubtext}>{healthMetrics.bmi.category}</Text>
-            </View>
-          </TouchableOpacity>
+        <MetricsCard 
+          healthMetrics={healthMetrics}
+          metricsLoading={metricsLoading}
+          onUpdateBMI={() => setShowUpdateBMIModal(true)}
+          onUpdateBP={() => setShowUpdateBPModal(true)}
+          onUpdateBloodType={() => setShowUpdateBloodTypeModal(true)}
+          onUpdateBMR={() => setShowUpdateBMRModal(true)}
+        />
 
-          <TouchableOpacity onPress={() => setShowUpdateBPModal(true)} activeOpacity={0.8}>
-            <View style={styles.metricCard}>
-              <MaterialIcons name="favorite" size={24} color="#51ffb4" shadowColor="#000" shadowOffset={{ width: 0, height: 2 }} shadowOpacity={0.5} shadowRadius={1}/>
-              <Text style={styles.metricTitle}>Blood Pressure</Text>
-              <Text style={styles.metricValue}>{healthMetrics.bloodPressure.systolic}/{healthMetrics.bloodPressure.diastolic}</Text>
-              <Text style={styles.metricSubtext}>{healthMetrics.bloodPressure.date}</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => setShowUpdateBloodTypeModal(true)} activeOpacity={0.8}>
-            <View style={styles.metricCard}>
-              <MaterialIcons name="bloodtype" size={24} color="#51ffb4" shadowColor="#000" shadowOffset={{ width: 0, height: 2 }} shadowOpacity={0.5} shadowRadius={1}/>
-              <Text style={styles.metricTitle}>Blood Type</Text>
-              <Text style={styles.metricValue}>{healthMetrics.bloodType}</Text>
-              <Text style={styles.metricSubtext}>{healthMetrics.bloodType.includes('O-') ? 'Universal donor' : healthMetrics.bloodType.includes('AB+') ? 'Universal recipient' : ''}</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => setShowUpdateBMRModal(true)} activeOpacity={0.8}>
-            <View style={styles.metricCard}>
-              <Fontisto name="fire" size={24} color="#51ffb4" shadowColor="#000" shadowOffset={{ width: 0, height: 2 }} shadowOpacity={0.5} shadowRadius={1}/>
-              <Text style={styles.metricTitle}>BMR</Text>
-              <Text style={styles.metricValue}>{healthMetrics.bmr.value}</Text>
-              <Text style={styles.metricSubtext}>{healthMetrics.bmr.category}</Text>
-            </View>
-          </TouchableOpacity>
-        </ScrollView>
-
-        <Text style={styles.sectionTitle}>Allergies</Text>
-        <View style={styles.allergiesContainer}>
-          <View style={styles.allergiesList}>
-            {healthMetrics.allergies.map((allergy, index) => (
-              <View key={index} style={styles.allergyTag}>
-                <Text style={styles.allergyText}>{allergy}</Text>
-              </View>
-            ))}
-            <TouchableOpacity 
-              style={styles.addAllergyButton} 
-              onPress={() => setShowAllergyModal(true)}
-            >
-              <MaterialIcons name="add" size={24} color="white" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <Text style={styles.sectionTitle}>Clinical Summary</Text>
-        <View style={styles.tabsContainer}>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tabsScrollView}
-          >
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'all' && styles.activeTab]} 
-              onPress={() => setActiveTab('all')}
-            >
-              <Text style={[styles.tabText, activeTab === 'all' && styles.activeTabText]}>All</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'lab' && styles.activeTab]} 
-              onPress={() => setActiveTab('lab')}
-            >
-              <Text style={[styles.tabText, activeTab === 'lab' && styles.activeTabText]}>Labs</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'prescription' && styles.activeTab]} 
-              onPress={() => setActiveTab('prescription')}
-            >
-              <Text style={[styles.tabText, activeTab === 'prescription' && styles.activeTabText]}>Prescriptions</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'note' && styles.activeTab]} 
-              onPress={() => setActiveTab('note')}
-            >
-              <Text style={[styles.tabText, activeTab === 'note' && styles.activeTabText]}>Notes</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
         
-        <View style={styles.recordsContainer}>
-          {filteredRecords.length > 0 ? (
-            filteredRecords.map((record) => (
-              <View key={record.id} style={styles.recordCard}>
-                <View style={styles.recordIcon}>
-                  <MaterialIcons name={getIconName(record.type)} size={24} color="#51ffb4" shadowColor="#000" shadowOffset={{ width: 0, height: 2 }} shadowOpacity={0.5} shadowRadius={1}/>
-                </View>
-                <View style={styles.recordInfo}>
-                  <View style={styles.recordHeader}>
-                    <Text style={styles.recordTitle}>{record.title}</Text>
-                    <Text style={styles.recordDate}>{new Date(record.date).toLocaleDateString()}</Text>
-                  </View>
-                  <Text style={styles.recordDoctor}>{record.doctor}</Text>
-                  <Text style={styles.recordDescription} numberOfLines={1}>
-                    {record.description}
-                  </Text>
-                  <View style={styles.recordType}>
-                    <Text style={styles.recordTypeText}>{getTypeLabel(record.type)}</Text>
-                  </View>
-                </View>
-              </View>
-            ))
-          ) : (
-            <View style={styles.emptyState}>
-              <MaterialIcons name="folder-open" size={50} color="#ccc" />
-              <Text style={styles.emptyStateText}>No records found</Text>
-            </View>
-          )}
-        </View>
+        <AllergiesList 
+          allergies={healthMetrics.allergies}
+          onDeleteAllergy={handleDeleteAllergy}
+          onAddAllergy={() => setShowAllergyModal(true)}
+        />
+
+        <RecordCard 
+          records={records}
+          activeTab={activeTab}
+          setActiveTab={handleTabChange}
+          emptyStateText="No health records found"
+          onRecordUpdated={fetchHealthRecords}
+        />
       </ScrollView>
       
-      <TouchableOpacity style={styles.addButton} onPress={() => setShowRecordModal(true)}>
-        <MaterialIcons name="add" size={24} color="white" />
+      <TouchableOpacity 
+        style={[styles.addButton, uploadingRecord && styles.addButtonDisabled]} 
+        onPress={() => setShowRecordModal(true)}
+        disabled={uploadingRecord}
+      >
+        {uploadingRecord ? (
+          <ActivityIndicator size={24} color="white" />
+        ) : (
+          <MaterialIcons name="add" size={24} color="white" />
+        )}
       </TouchableOpacity>
       
       <BottomMenu activeRoute="HealthRecords" />
@@ -383,30 +655,35 @@ const HealthRecords = () => {
         visible={showRecordModal}
         onClose={() => setShowRecordModal(false)}
         onAdd={handleAddRecord}
+        uploading={uploadingRecord}
       />
 
       <UpdateBMI 
         visible={showUpdateBMIModal}
         onClose={() => setShowUpdateBMIModal(false)}
         onUpdate={handleUpdateBMI}
+        currentData={rawHealthData}
       />
 
       <UpdateBloodPressure
         visible={showUpdateBPModal}
         onClose={() => setShowUpdateBPModal(false)}
         onUpdate={handleUpdateBP}
+        currentData={rawHealthData}
       />
       
       <UpdateBloodType
         visible={showUpdateBloodTypeModal}
         onClose={() => setShowUpdateBloodTypeModal(false)}
         onUpdate={handleUpdateBloodType}
+        currentData={rawHealthData}
       />
       
       <UpdateBMR
         visible={showUpdateBMRModal}
         onClose={() => setShowUpdateBMRModal(false)}
         onUpdate={handleUpdateBMR}
+        currentData={rawHealthData}
       />
     </View>
   );
@@ -416,6 +693,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingText: {
+    fontFamily: 'DarkerGrotesque-Bold',
+    fontSize: 18,
+    color: '#333',
+    marginTop: 16,
   },
   scrollView: {
     flex: 1,
@@ -438,199 +727,29 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
   },
-  tabsContainer: {
-    marginBottom: 20,
-    //backgroundColor: 'green',
-    marginTop: -10,
-  },
-  tabsScrollView: {
-    paddingVertical: 8,
-  },
-  tab: {
-    //paddingVertical: 8,
-    paddingTop: 4,
-    paddingBottom: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginRight: 8,
-    backgroundColor: 'white',
-  },
-  activeTab: {
-    backgroundColor: '#51ffc6',
-  },
-  tabText: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 15,
-    color: '#666',
-  },
-  activeTabText: {
-    color: '#000',
-    fontFamily: 'DarkerGrotesque-Bold',
-  },
-  recordsContainer: {
-    paddingBottom: 100,
-  },
-  recordCard: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 15,
-    padding: 16,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  recordIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#e8faf4',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
-  },
-  recordInfo: {
-    flex: 1,
-  },
-  recordHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  recordTitle: {
-    fontFamily: 'DarkerGrotesque-Bold',
-    fontSize: 16,
-    color: '#333',
-  },
-  recordDate: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 12,
-    color: '#666',
-  },
-  recordDoctor: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
-  recordDescription: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 8,
-  },
-  recordType: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#e8faf4',
-    borderRadius: 12,
-    paddingBottom: 8,
-    paddingTop: 4,
-    paddingHorizontal: 10,
-  },
-  recordTypeText: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 12,
-    color: '#0a7c53',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyStateText: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 16,
-    color: '#999',
-    marginTop: 16,
-  },
-  addButton: {
-    position: 'absolute',
-    bottom: 100,
-    right: 24,
-    width: 50,
-    height: 50,
-    borderRadius: 28,
-    backgroundColor: '#51ffc6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  },
-  metricsScroll: {
-    marginBottom: 20,
-    //backgroundColor: 'red',
-  },
-  metricsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: 16,
-    //backgroundColor: 'blue',
-    height: 130,
-  },
-  metricCard: {
-    width: 140,
-    height: 120,
-    backgroundColor: 'white',
-    borderRadius: 15,
-    padding: 12,
-    marginHorizontal: 4,
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  metricTitle: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 15,
-    color: '#666',
-    marginTop: 8,
-  },
-  metricValue: {
-    fontFamily: 'DarkerGrotesque-Bold',
-    fontSize: 20,
-    color: '#333',
-    marginTop: 4,
-  },
-  metricSubtext: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 10,
-    color: '#666',
-    marginTop: 2,
-  },
-  allergiesContainer: {
-    marginBottom: 20,
-  },
   sectionTitle: {
     fontFamily: 'DarkerGrotesque-Bold',
-    //backgroundColor: 'green',
     fontSize: 22,
     color: '#333',
     marginBottom: 16,
     marginTop: 8,
+  },
+  allergiesContainer: {
+    marginBottom: 20,
   },
   allergiesList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
   allergyTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'white',
     borderRadius: 20,
     paddingTop: 7,
     paddingBottom: 8,
-    paddingHorizontal: 15,
+    paddingLeft: 15,
+    paddingRight: 8,
     marginRight: 8,
     marginBottom: 8,
     elevation: 2,
@@ -643,13 +762,15 @@ const styles = StyleSheet.create({
     fontFamily: 'DarkerGrotesque',
     fontSize: 15,
     color: '#666',
+    marginRight: 8,
   },
-  metricIcon: {
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
+  deleteAllergyButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addAllergyButton: {
     backgroundColor: '#51ffc6',
@@ -667,97 +788,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  addButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 28,
+    backgroundColor: '#51ffc6',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 20,
-    width: '80%',
-    elevation: 5,
+    elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
   },
-  modalTitle: {
-    fontFamily: 'DarkerGrotesque-Bold',
-    fontSize: 20,
-    color: '#333',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 20,
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  modalButton: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 25,
-    marginHorizontal: 5,
-  },
-  cancelButton: {
-    backgroundColor: '#f5f5f5',
-  },
-  modalAddButton: {
-    backgroundColor: '#51ffc6',
-  },
-  modalButtonText: {
-    fontFamily: 'DarkerGrotesque-Bold',
-    fontSize: 18,
-    textAlign: 'center',
-    color: '#666',
-
-  },
-  addButtonText: {
-    color: '#000',
-    marginBottom: 5,
-  },
-  typeSelector: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  typeButton: {
-    flex: 1,
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 10,
-    marginHorizontal: 5,
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: '#51ffb4',
-  },
-  selectedType: {
-    backgroundColor: '#51ffb4',
-  },
-  typeText: {
-    fontFamily: 'DarkerGrotesque',
-    fontSize: 14,
-    color: '#51ffb4',
-    marginTop: 5,
-  },
-  selectedTypeText: {
-    color: 'white',
-  },
-  descriptionInput: {
-    height: 100,
-    textAlignVertical: 'top',
-    paddingTop: 12,
+  addButtonDisabled: {
+    backgroundColor: '#ccc',
   },
 });
 

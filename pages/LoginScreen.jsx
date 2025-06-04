@@ -28,17 +28,54 @@ const LoginScreen = () => {
   const [email, setEmail] = useState('');
   const [requiresEmail, setRequiresEmail] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState('phone'); // 'phone' or 'email'
   const [fontsLoaded] = useFonts({
     'DarkerGrotesque': require('@expo-google-fonts/darker-grotesque').DarkerGrotesque_500Medium,
     'DarkerGrotesque-Bold': require('@expo-google-fonts/darker-grotesque').DarkerGrotesque_700Bold,
   });
 
-  const handleSendOTP = async () => {
+  const handlePhoneCheck = async () => {
     if (!phoneNumber.trim()) {
       Alert.alert('Error', 'Please enter your phone number');
       return;
     }
 
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/otps/check-phone`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ phone: phoneNumber }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        if (data.exists && data.verified && data.hasPassword) {
+          // User has account with password → Navigate to password login
+          navigation.navigate('PasswordLoginScreen', { phone: phoneNumber });
+        } else if (data.exists && data.hasEmail) {
+          // User exists and has email → Send OTP directly
+          await handleSendOTP();
+        } else {
+          // User doesn't exist or needs email → Show email input
+          setRequiresEmail(true);
+          setCurrentStep('email');
+        }
+      } else {
+        Alert.alert('Error', data.error || 'Failed to check phone number');
+      }
+    } catch (error) {
+      console.error('Error checking phone:', error);
+      Alert.alert('Error', 'Failed to connect to the server. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSendOTP = async () => {
     if (requiresEmail && !email.trim()) {
       Alert.alert('Error', 'Please enter your email address');
       return;
@@ -46,31 +83,33 @@ const LoginScreen = () => {
 
     setIsLoading(true);
     try {
-      // const payload = { phone: phoneNumber };
-      // if (requiresEmail || email) {
-      //   payload.email = email;
-      // }
+      const payload = { phone: phoneNumber };
+      if (requiresEmail || email) {
+        payload.email = email;
+      }
 
-      // const response = await fetch(`${API_URL}/otps/request-otp`, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify(payload),
-      // });
+      const response = await fetch(`${API_URL}/otps/request-otp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
-      // const data = await response.json();
-      // if (response.ok) {
-      //   navigation.navigate('OTPScreen', { phone: phoneNumber, email: email || data.email });
-      // } else if (data.requiresEmail) {
-      //   setRequiresEmail(true);
-      //   Alert.alert('Email Required', 'Your phone number is not connected to an email address. Please enter your email address to continue');
-      // } else {
-      //   Alert.alert('Error', data.error || 'Failed to send OTP');
-      // }
-
-      // Simulate success and navigate to OTPScreen
-      navigation.navigate('OTPScreen', { phone: phoneNumber, email });
+      const data = await response.json();
+      if (response.ok) {
+        navigation.navigate('OTPScreen', { 
+          phone: phoneNumber, 
+          email: email || data.email,
+          isNewCustomer: data.isNewCustomer 
+        });
+      } else if (data.requiresEmail) {
+        setRequiresEmail(true);
+        setCurrentStep('email');
+        Alert.alert('Email Required', data.error || 'Please enter your email address to continue');
+      } else {
+        Alert.alert('Error', data.error || 'Failed to send OTP');
+      }
     } catch (error) {
       console.error('Error sending OTP:', error);
       Alert.alert('Error', 'Failed to connect to the server. Please try again.');
@@ -78,10 +117,25 @@ const LoginScreen = () => {
       setIsLoading(false);
     }
   };
+
+  const handleContinue = () => {
+    if (currentStep === 'phone') {
+      handlePhoneCheck();
+    } else {
+      handleSendOTP();
+    }
+  };
+
+  const handleBackToPhone = () => {
+    setCurrentStep('phone');
+    setRequiresEmail(false);
+    setEmail('');
+  };
   
   if (!fontsLoaded) {
     return null;
   }
+
   return (
     <KeyboardAvoidingView 
       style={{ flex: 1 }}
@@ -101,41 +155,72 @@ const LoginScreen = () => {
             <View style={styles.logoWrapper}>
               <Image source={MediMaster} style={styles.logo} />
             </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter phone number"
-              placeholderTextColor="#888"
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              keyboardType="phone-pad"
-            />
-            
-            {requiresEmail && (
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your email"
-                placeholderTextColor="#888"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+
+            {currentStep === 'phone' ? (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter phone number"
+                  placeholderTextColor="#888"
+                  value={phoneNumber}
+                  onChangeText={setPhoneNumber}
+                  keyboardType="phone-pad"
+                  autoFocus={true}
+                />
+                
+                <TouchableOpacity 
+                  style={[styles.button, isLoading && styles.buttonDisabled]}
+                  onPress={handleContinue}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color="#333" />
+                  ) : (
+                    <Text style={styles.buttonText}>Continue</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={styles.header}>
+                  <Text style={styles.title}>Email Required</Text>
+                  <Text style={styles.subtitle}>
+                    Please enter your email to continue with {phoneNumber}
+                  </Text>
+                </View>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your email"
+                  placeholderTextColor="#888"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoFocus={true}
+                />
+                
+                <TouchableOpacity 
+                  style={[styles.button, isLoading && styles.buttonDisabled]}
+                  onPress={handleContinue}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color="#333" />
+                  ) : (
+                    <Text style={styles.buttonText}>Send OTP</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={handleBackToPhone} style={styles.backButton}>
+                  <Text style={styles.backButtonText}>← Back to Phone Number</Text>
+                </TouchableOpacity>
+              </>
             )}
-            <TouchableOpacity 
-              style={[styles.button, isLoading && styles.buttonDisabled]}
-              onPress={handleSendOTP}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#333" />
-              ) : (
-                <Text style={styles.buttonText}>Send OTP</Text>
-              )}
-            </TouchableOpacity>
+
             <Text 
               style={styles.registerLink}
-              onPress={() => navigation.navigate('RegisterScreen')}
             >
               Worry less, live healthier!
             </Text>
@@ -160,6 +245,24 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  header: {
+    marginBottom: 30,
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+    fontFamily: 'DarkerGrotesque-Bold',
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 18,
+    color: '#666',
+    textAlign: 'center',
+    fontFamily: 'DarkerGrotesque',
   },
   input: {
     height: 55,
@@ -201,6 +304,16 @@ const styles = StyleSheet.create({
     fontSize: 25,
     fontWeight: 'bold',
     fontFamily: 'DarkerGrotesque-Bold',
+  },
+  backButton: {
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  backButtonText: {
+    color: '#333',
+    fontSize: 18,
+    fontFamily: 'DarkerGrotesque',
+    textDecorationLine: 'underline',
   },
   registerLink: {
     color: '#333',

@@ -1,12 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard } from 'react-native';
 
 const BLOOD_TYPES = [
   'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'
 ];
 
-const UpdateBloodType = ({ visible, onClose, onUpdate }) => {
+const UpdateBloodType = ({ visible, onClose, onUpdate, currentData }) => {
   const [selectedType, setSelectedType] = useState('');
+
+  useEffect(() => {
+    // Reset form when modal is closed or populate with current data when opened
+    if (!visible) {
+      setSelectedType('');
+    } else if (currentData && currentData.blood_type) {
+      // Pre-populate with current blood type if available
+      setSelectedType(currentData.blood_type);
+    }
+  }, [visible, currentData]);
 
   const handleUpdate = () => {
     if (!selectedType) return;
@@ -30,6 +40,14 @@ const UpdateBloodType = ({ visible, onClose, onUpdate }) => {
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>Update Blood Type</Text>
               <Text style={styles.modalSubtitle}>Select your blood type to keep your medical information up to date.</Text>
+              
+              {currentData && currentData.blood_type && currentData.blood_type !== 'Unknown' && (
+                <View style={styles.currentDataContainer}>
+                  <Text style={styles.currentDataTitle}>Current Blood Type:</Text>
+                  <Text style={styles.currentDataText}>{currentData.blood_type}</Text>
+                  <Text style={styles.currentDataText}>Last Updated: {currentData.updated_at ? new Date(currentData.updated_at).toLocaleDateString() : 'Never'}</Text>
+                </View>
+              )}
               
               <View style={styles.bloodTypeGrid}>
                 {BLOOD_TYPES.map(type => (
@@ -97,6 +115,23 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 20,
     textAlign: 'center',
+  },
+  currentDataContainer: {
+    backgroundColor: '#f5f5f5',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 20,
+  },
+  currentDataTitle: {
+    fontFamily: 'DarkerGrotesque-Bold',
+    fontSize: 18,
+    color: '#666',
+    marginBottom: 5,
+  },
+  currentDataText: {
+    fontFamily: 'DarkerGrotesque',
+    fontSize: 16,
+    color: '#666',
   },
   bloodTypeGrid: {
     flexDirection: 'row',

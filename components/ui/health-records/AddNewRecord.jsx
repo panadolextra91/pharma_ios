@@ -1,58 +1,116 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Platform, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, ScrollView, ActivityIndicator } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 
-const AddNewRecord = ({ visible, onClose, onAdd }) => {
+// Helper function for type-specific styles similar to RecordCard
+const getTypeSpecificStyles = (type, selectedType) => {
+  const isActive = type === selectedType;
+  switch(type) {
+    case 'lab': 
+      return {
+        iconColor: isActive ? '#3498db' : '#95a5a6',
+        bgColor: isActive ? '#ebf3fd' : 'white',
+        textColor: isActive ? '#2980b9' : '#666',
+        borderColor: isActive ? '#3498db' : '#ddd',
+      };
+    case 'prescription': 
+      return {
+        iconColor: isActive ? '#27ae60' : '#95a5a6',
+        bgColor: isActive ? '#eafaf1' : 'white',
+        textColor: isActive ? '#229954' : '#666',
+        borderColor: isActive ? '#27ae60' : '#ddd',
+      };
+    case 'note': 
+      return {
+        iconColor: isActive ? '#f39c12' : '#95a5a6',
+        bgColor: isActive ? '#fef9e7' : 'white',
+        textColor: isActive ? '#e67e22' : '#666',
+        borderColor: isActive ? '#f39c12' : '#ddd',
+      };
+    default: 
+      return {
+        iconColor: '#95a5a6',
+        bgColor: 'white',
+        textColor: '#666',
+        borderColor: '#ddd',
+      };
+  }
+};
+
+const AddNewRecord = ({ visible, onClose, onAdd, uploading }) => {
   const [newRecord, setNewRecord] = useState({
     type: '',
     doctor: '',
     title: '',
     date: '',
-    description: '',
-    image: null
+    description: ''
   });
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [pickingFile, setPickingFile] = useState(false);
 
-  const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (status !== 'granted') {
-      alert('Sorry, we need camera roll permissions to make this work!');
-      return;
-    }
-    
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-    
-    if (!result.canceled) {
-      setNewRecord(prev => ({
-        ...prev,
-        image: result.assets[0].uri
-      }));
+  const pickFile = async () => {
+    try {
+      setPickingFile(true);
+      
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/*', 'application/pdf', 'text/*', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        copyToCacheDirectory: true
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        console.log('📎 File selected:', file);
+        
+        setSelectedFile({
+          uri: file.uri,
+          name: file.name,
+          mimeType: file.mimeType,
+          size: file.size
+        });
+      }
+    } catch (error) {
+      console.error('Error picking file:', error);
+      alert('Error selecting file. Please try again.');
+    } finally {
+      setPickingFile(false);
     }
   };
   
-  const handleAddRecord = () => {
-    if (newRecord.type && newRecord.doctor && newRecord.title && newRecord.date && newRecord.description) {
-      // For prescription type, image is optional but encouraged
-      onAdd({
-        id: Date.now().toString(),
-        ...newRecord
-      });
-      setNewRecord({
-        type: '',
-        doctor: '',
-        title: '',
-        date: '',
-        description: '',
-        image: null
-      });
-      onClose();
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const getFileIcon = (mimeType) => {
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType === 'application/pdf') return 'picture-as-pdf';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'description';
+    if (mimeType.startsWith('text/')) return 'text-snippet';
+    return 'attach-file';
+  };
+  
+  const handleAddRecord = async () => {
+    if (!newRecord.type || !newRecord.title) {
+      alert('Please fill in at least the record type and title.');
+      return;
     }
+
+    // Call the parent function with record data and file
+    await onAdd(newRecord, selectedFile);
+    
+    // Reset form
+    setNewRecord({
+      type: '',
+      doctor: '',
+      title: '',
+      date: '',
+      description: ''
+    });
+    setSelectedFile(null);
   };
 
   return (
@@ -75,47 +133,55 @@ const AddNewRecord = ({ visible, onClose, onAdd }) => {
                 style={styles.scrollView}
               >
                 <View style={styles.modalContent}>
-                  <Text style={styles.modalTitle}>Add New Clinical Record</Text>
+                  <Text style={styles.modalTitle}>Add New Health Record</Text>
                   
                   <View style={styles.typeSelector}>
-                    <TouchableOpacity 
-                      style={[styles.typeButton, newRecord.type === 'lab' && styles.selectedType]} 
-                      onPress={() => setNewRecord(prev => ({...prev, type: 'lab'}))}
-                    >
-                      <MaterialIcons name="science" size={24} color={newRecord.type === 'lab' ? '#51ffb4' : '#888'} />
-                      <Text style={[styles.typeText, newRecord.type === 'lab' && styles.selectedTypeText]}>Lab</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                      style={[styles.typeButton, newRecord.type === 'prescription' && styles.selectedType]} 
-                      onPress={() => setNewRecord(prev => ({...prev, type: 'prescription'}))}
-                    >
-                      <MaterialIcons name="medication" size={24} color={newRecord.type === 'prescription' ? '#51ffb4' : '#888'} />
-                      <Text style={[styles.typeText, newRecord.type === 'prescription' && styles.selectedTypeText]}>Prescription</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                      style={[styles.typeButton, newRecord.type === 'note' && styles.selectedType]} 
-                      onPress={() => setNewRecord(prev => ({...prev, type: 'note'}))}
-                    >
-                      <MaterialIcons name="note" size={24} color={newRecord.type === 'note' ? '#51ffb4' : '#888'} />
-                      <Text style={[styles.typeText, newRecord.type === 'note' && styles.selectedTypeText]}>Note</Text>
-                    </TouchableOpacity>
-                  </View>
+                    {['lab', 'prescription', 'note'].map(type => {
+                      const typeStyle = getTypeSpecificStyles(type, newRecord.type);
+                      let iconName = 'folder';
+                      if (type === 'lab') iconName = 'science';
+                      if (type === 'prescription') iconName = 'medication';
+                      if (type === 'note') iconName = 'description';
 
-                  <TextInput
-                    style={styles.modalInput}
-                    value={newRecord.doctor}
-                    onChangeText={(text) => setNewRecord(prev => ({...prev, doctor: text}))}
-                    placeholder="Doctor's Name"
-                    placeholderTextColor="#999"
-                  />
+                      return (
+                        <TouchableOpacity 
+                          key={type}
+                          style={[
+                            styles.typeButton,
+                            { 
+                              backgroundColor: typeStyle.bgColor,
+                              borderColor: typeStyle.borderColor,
+                            },
+                            newRecord.type === type && styles.selectedType // Keep specific selectedType shadow/elevation if needed
+                          ]} 
+                          onPress={() => setNewRecord(prev => ({...prev, type: type}))}
+                        >
+                          <MaterialIcons name={iconName} size={24} color={typeStyle.iconColor} />
+                          <Text style={[
+                            styles.typeText, 
+                            { color: typeStyle.textColor }, 
+                            newRecord.type === type && styles.selectedTypeText
+                          ]}>
+                            {type.charAt(0).toUpperCase() + type.slice(1)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
 
                   <TextInput
                     style={styles.modalInput}
                     value={newRecord.title}
                     onChangeText={(text) => setNewRecord(prev => ({...prev, title: text}))}
-                    placeholder="Title"
+                    placeholder="Title (required)"
+                    placeholderTextColor="#999"
+                  />
+
+                  <TextInput
+                    style={styles.modalInput}
+                    value={newRecord.doctor}
+                    onChangeText={(text) => setNewRecord(prev => ({...prev, doctor: text}))}
+                    placeholder="Doctor/Provider Name"
                     placeholderTextColor="#999"
                   />
 
@@ -123,7 +189,7 @@ const AddNewRecord = ({ visible, onClose, onAdd }) => {
                     style={styles.modalInput}
                     value={newRecord.date}
                     onChangeText={(text) => setNewRecord(prev => ({...prev, date: text}))}
-                    placeholder="Date (YYYY-MM-DD)"
+                    placeholder="Date (YYYY-MM-DD, optional)"
                     placeholderTextColor="#999"
                   />
 
@@ -131,56 +197,76 @@ const AddNewRecord = ({ visible, onClose, onAdd }) => {
                     style={[styles.modalInput, styles.descriptionInput]}
                     value={newRecord.description}
                     onChangeText={(text) => setNewRecord(prev => ({...prev, description: text}))}
-                    placeholder="Description"
+                    placeholder="Description or notes"
                     placeholderTextColor="#999"
                     multiline={true}
                     numberOfLines={4}
                   />
                   
-                  {newRecord.type === 'prescription' && (
-                    <View style={styles.imageUploadContainer}>
-                      <Text style={styles.imageUploadLabel}>Upload Prescription Image (Optional)</Text>
-                      
-                      <TouchableOpacity 
-                        style={styles.imageUploadButton} 
-                        onPress={pickImage}
-                      >
-                        <MaterialIcons name="photo-camera" size={24} color="#666" />
-                        <Text style={styles.imageUploadButtonText}>
-                          {newRecord.image ? 'Change Image' : 'Select Image'}
-                        </Text>
-                      </TouchableOpacity>
-                      
-                      {newRecord.image && (
-                        <View style={styles.imagePreviewContainer}>
-                          <Image 
-                            source={{ uri: newRecord.image }} 
-                            style={styles.imagePreview} 
-                            resizeMode="cover"
+                  <View style={styles.fileUploadContainer}>
+                    <Text style={styles.fileUploadLabel}>Attach File (Optional)</Text>
+                    <Text style={styles.fileUploadSubtext}>Images, PDFs, documents supported</Text>
+                    
+                    <TouchableOpacity 
+                      style={styles.fileUploadButton} 
+                      onPress={pickFile}
+                      disabled={pickingFile}
+                    >
+                      {pickingFile ? (
+                        <ActivityIndicator size={24} color="#666" />
+                      ) : (
+                        <MaterialIcons name="attach-file" size={24} color="#666" />
+                      )}
+                      <Text style={styles.fileUploadButtonText}>
+                        {pickingFile ? 'Selecting...' : selectedFile ? 'Change File' : 'Select File'}
+                      </Text>
+                    </TouchableOpacity>
+                    
+                    {selectedFile && (
+                      <View style={styles.filePreviewContainer}>
+                        <View style={styles.filePreview}>
+                          <MaterialIcons 
+                            name={getFileIcon(selectedFile.mimeType)} 
+                            size={32} 
+                            color={newRecord.type ? getTypeSpecificStyles(newRecord.type, newRecord.type).iconColor : '#51ffc6'} 
                           />
+                          <View style={styles.fileInfo}>
+                            <Text style={styles.fileName} numberOfLines={1}>
+                              {selectedFile.name}
+                            </Text>
+                            <Text style={styles.fileSize}>
+                              {formatFileSize(selectedFile.size)}
+                            </Text>
+                          </View>
                           <TouchableOpacity 
-                            style={styles.removeImageButton}
-                            onPress={() => setNewRecord(prev => ({ ...prev, image: null }))}
+                            style={styles.removeFileButton}
+                            onPress={() => setSelectedFile(null)}
                           >
-                            <MaterialIcons name="close" size={20} color="white" />
+                            <MaterialIcons name="close" size={20} color="#666" />
                           </TouchableOpacity>
                         </View>
-                      )}
-                    </View>
-                  )}
+                      </View>
+                    )}
+                  </View>
 
                   <View style={styles.modalButtons}>
                     <TouchableOpacity 
                       style={[styles.modalButton, styles.cancelButton]} 
                       onPress={onClose}
+                      disabled={uploading}
                     >
                       <Text style={styles.modalButtonText}>Cancel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity 
-                      style={[styles.modalButton, styles.modalAddButton]} 
+                      style={[styles.modalButton, styles.modalAddButton, uploading && styles.disabledButton]} 
                       onPress={handleAddRecord}
+                      disabled={uploading || !newRecord.type || !newRecord.title}
                     >
-                      <Text style={[styles.modalButtonText, styles.addButtonText]}>Add</Text>
+                      {uploading ? (
+                        <ActivityIndicator size={20} color="white" />
+                      ) : (
+                        <Text style={[styles.modalButtonText, styles.addButtonText]}>Add Record</Text>
+                      )}
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -207,6 +293,7 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     width: '100%',
+    maxHeight: '90%', // Add maxHeight to prevent overflow on smaller screens
   },
   modalScrollContent: {
     flexGrow: 1,
@@ -238,21 +325,22 @@ const styles = StyleSheet.create({
   typeButton: {
     flex: 1,
     alignItems: 'center',
-    padding: 10,
-    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 15, // Match RecordCard borderRadius
     marginHorizontal: 5,
     backgroundColor: 'white',
     borderWidth: 1,
     borderColor: '#ddd',
+    elevation: 1, // Slight elevation for inactive
   },
   selectedType: {
-    backgroundColor: '#e8faf4',
-    borderWidth: 0,
-    elevation: 2,
+    // Use typeSpecificStyles for background and border
+    elevation: 3, // Higher elevation for active
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
   },
   typeText: {
     fontFamily: 'DarkerGrotesque',
@@ -261,95 +349,120 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   selectedTypeText: {
-    color: '#333',
+    // color will be set by typeSpecificStyles
     fontFamily: 'DarkerGrotesque-Bold',
   },
   modalInput: {
     borderWidth: 1,
     borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 20,
+    borderRadius: 15, // Match RecordCard
+    padding: 15, // Slightly more padding
+    marginBottom: 15, // Consistent margin
     fontFamily: 'DarkerGrotesque',
     fontSize: 16,
   },
   descriptionInput: {
     height: 100,
     textAlignVertical: 'top',
-    paddingTop: 12,
+    paddingTop: 15, // Match padding
+    marginBottom: 15,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginTop: 10, // Add some margin before buttons
   },
   modalButton: {
     flex: 1,
-    padding: 12,
-    borderRadius: 25,
+    paddingVertical: 15, // More padding
+    borderRadius: 15, // Match RecordCard
     marginHorizontal: 5,
+    alignItems: 'center', // Center content
+    justifyContent: 'center',
   },
   cancelButton: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f5f5f5', // Light gray, good contrast
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
   },
   modalAddButton: {
-    backgroundColor: '#51ffc6',
+    backgroundColor: '#51ffc6', // Main theme green from RecordCard active tab
+  },
+  disabledButton: {
+    backgroundColor: '#ccc',
   },
   modalButtonText: {
     fontFamily: 'DarkerGrotesque-Bold',
-    fontSize: 18,
+    fontSize: 16, // Slightly smaller for better fit
     textAlign: 'center',
-    color: '#666',
+    color: '#666', // Default for cancel
   },
   addButtonText: {
-    color: '#000',
-    marginBottom: 5,
+    color: '#333', // Darker text for green button, like active tab
   },
-  imageUploadContainer: {
+  fileUploadContainer: {
     marginBottom: 20,
   },
-  imageUploadLabel: {
+  fileUploadLabel: {
     fontFamily: 'DarkerGrotesque-Bold',
     fontSize: 16,
     color: '#333',
+    marginBottom: 5,
+  },
+  fileUploadSubtext: {
+    fontFamily: 'DarkerGrotesque',
+    fontSize: 12,
+    color: '#666',
     marginBottom: 10,
   },
-  imageUploadButton: {
+  fileUploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f5f5f5',
-    padding: 12,
-    borderRadius: 10,
+    backgroundColor: '#f8f9fa', // Light background consistent with RecordCard default
+    padding: 15,
+    borderRadius: 15, // Match
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderStyle: 'dashed',
+    borderColor: '#e0e0e0', // Softer border
+    // borderStyle: 'dashed', // Dashed can look a bit busy, solid is cleaner
   },
-  imageUploadButtonText: {
-    fontFamily: 'DarkerGrotesque',
+  fileUploadButtonText: {
+    fontFamily: 'DarkerGrotesque-Bold', // Bolder text
     fontSize: 16,
-    color: '#666',
+    color: '#555', // Darker gray
     marginLeft: 8,
   },
-  imagePreviewContainer: {
-    marginTop: 10,
-    position: 'relative',
-    alignSelf: 'center',
+  filePreviewContainer: {
+    marginTop: 15,
   },
-  imagePreview: {
-    width: 200,
-    height: 150,
-    borderRadius: 10,
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: -10,
-    right: -10,
-    backgroundColor: '#ff6b6b',
-    borderRadius: 15,
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
+  filePreview: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#f8f9fa', // Consistent light background
+    padding: 12,
+    borderRadius: 15, // Match
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  fileInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  fileName: {
+    fontFamily: 'DarkerGrotesque-Bold',
+    fontSize: 14,
+    color: '#333',
+  },
+  fileSize: {
+    fontFamily: 'DarkerGrotesque',
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  removeFileButton: {
+    padding: 5, // Slightly more touch area
+    borderRadius: 15, // Match
+    backgroundColor: '#e0e0e0', // Softer background for remove icon
   },
 });
 
